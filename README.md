@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/Version-0.0.1-6f42c1" alt="Version 0.0.1"></a>
+  <a href="#"><img src="https://img.shields.io/badge/Version-0.0.2-6f42c1" alt="Version 0.0.2"></a>
   <a href="https://isocpp.org/"><img src="https://img.shields.io/badge/C%2B%2B-17-00599C?logo=c%2B%2B&logoColor=white" alt="C++17"></a>
   <a href="#"><img src="https://img.shields.io/badge/Platform-Windows%2010%2F11%20(x64)-0078D6?logo=windows&logoColor=white" alt="Platform"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License"></a>
@@ -129,7 +129,7 @@ Cookier operates silently by default. You must pass the `--browser` flag to init
 | :--- | :--- | :--- |
 | `--browser <name>` | `-b` | Required. `chrome` or `all`. |
 | `--profile <names>` | `-p` | `all` or a space-separated list of profile folder names. Defaults to `Default`. |
-| `--output <path>` | `-o` | Output JSON path. Defaults to `%USERPROFILE%\Downloads\cookies.json`. |
+| `--output <path>` | `-o` | Output JSON path. If omitted, JSON is printed to stdout. |
 | `--verbose` | `-v` | Enable debug logs. |
 | `--help` | `-h` | Show usage. |
 

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <string>
 
 #ifdef PROVIDER_EXPORTS
@@ -8,5 +8,5 @@
 #endif
 
 extern "C" {
-    PROVIDER_API bool ExtractCookies(char** outJson, const char* profileList, bool verbose);
+    PROVIDER_API bool ExtractCookies(char** outJson, const char* browserName, const char* profileList, bool verbose);
 }

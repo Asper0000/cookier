@@ -1,3 +1,5 @@
 /build
 patch.bat
 build.bat
+/docs
+patch.ps1

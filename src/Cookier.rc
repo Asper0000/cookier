@@ -1,8 +1,10 @@
-100 RCDATA "Provider_Chrome.dll"
+﻿IDI_ICON1 ICON "C:/Users/PC/Documents/Projects/cookier/assets/icon.ico"
+
+100 RCDATA "Provider_Chromium.dll"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 0,0,1,0
-PRODUCTVERSION 0,0,1,0
+FILEVERSION 0,0,2,0
+PRODUCTVERSION 0,0,2,0
 FILEFLAGSMASK 0x3fL
 FILEFLAGS 0x0L
 FILEOS 0x40004L
@@ -14,13 +16,13 @@ BEGIN
         BLOCK "040904b0"
         BEGIN
             VALUE "CompanyName", "Cookier"
-            VALUE "FileDescription", "Browser cookie extractor"
-            VALUE "FileVersion", "0.0.1.0"
+            VALUE "FileDescription", "Cookier - Multi-Browser Cookie Extractor"
+            VALUE "FileVersion", "0.0.2.0"
             VALUE "InternalName", "Cookier"
             VALUE "LegalCopyright", "Copyright (C) 2026 - GPLv3"
             VALUE "OriginalFilename", "Cookier.exe"
             VALUE "ProductName", "Cookier"
-            VALUE "ProductVersion", "0.0.1.0"
+            VALUE "ProductVersion", "0.0.2.0"
         END
     END
     BLOCK "VarFileInfo"
