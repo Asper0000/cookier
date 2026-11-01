@@ -34,12 +34,12 @@
 
 ## What is Cookier?
 
-**Cookier** is a lightweight, native command-line tool designed for security researchers, digital forensics analysts, and power users. It safely extracts browser cookies and exports them into a structured JSON file.
+**Cookier** is a lightweight, native command-line tool designed for security researchers, digital forensics analysts, and power users. It safely extracts browser cookies and exports them as structured JSON.
 
-Unlike monolithic tools that break when a single browser updates its security model, Cookier is built on a **modular provider architecture**. The core executable handles the CLI, file output, and process management, while each browser's specific extraction logic is isolated in its own independent provider. This means adding support for a new browser is as simple as dropping in a new provider.
+Unlike monolithic tools that break when a single browser updates its security model, Cookier is built on a **modular provider architecture**. The core executable handles the CLI, file output, and process management, while each browser's specific extraction logic is isolated in its own provider. This means adding support for a new browser is as simple as dropping in a new provider.
 
-- **Fully portable.** `Cookier.exe` is a single, self-contained binary. All browser providers and their dependencies (like SQLite) are embedded directly inside the executable. No installers, no external DLLs.
-- **Non-intrusive.** Cookier is designed to handle running browsers safely. It gracefully bypasses file locks without forcing the user to close their browser or risking database corruption.
+- **Fully portable.** `Cookier.exe` is a single, self-contained binary (~2.3 MB). All browser providers and their dependencies (like SQLite) are embedded directly inside the executable. No installers, no external DLLs.
+- **Non-intrusive.** Cookier handles running browsers safely. It gracefully bypasses file locks without forcing the user to close their browser or risking database corruption.
 - **Extensible.** Built from the ground up to support multiple browsers.
 
 ---
@@ -47,19 +47,20 @@ Unlike monolithic tools that break when a single browser updates its security mo
 ## Features
 
 - ✅ **Modular Providers** — Separate, isolated logic for each browser. Adding a new browser does not affect existing ones.
+- ✅ **Chrome + Edge support** — Full support for the modern App-Bound Encryption (ABE) era (Chrome 127+, Edge 127+, including 144+).
 - ✅ **Live Browser Extraction** — Safely extracts data from browsers that are currently open and running.
-- ✅ **Modern Encryption Support** — Designed to handle the latest cryptographic protections employed by modern browsers.
 - ✅ **Multi-Profile Support** — Extract from default profiles, specific named profiles, or all profiles at once.
 - ✅ **Silent Operation** — If a target browser is not running, Cookier can launch a hidden, background instance to extract the data and then cleanly terminate itself.
-- ✅ **Structured Output** — Exports organized JSON grouped cleanly by profile name.
+- ✅ **Pretty-Printed JSON** — Structured output grouped by profile, piped to stdout by default so any external tool can consume it.
+- ✅ **No external dependencies** — SQLite, the injector, and the provider are all statically linked and embedded.
 
 ---
 
 ## How it works
 
-1.  **Provider Selection** — Based on your CLI arguments, Cookier loads the appropriate embedded provider module into a secure temporary environment.
-2.  **Data Acquisition** — The provider locates the browser's cookie database and safely accesses it, even if the browser is actively running and holding file locks.
-3.  **Decryption** — The provider utilizes browser-specific techniques to unwrap the encryption keys required to decrypt the cookie payload.
+1.  **Provider Selection** — Based on your CLI arguments, Cookier loads the embedded provider module into a secure temporary environment.
+2.  **Data Acquisition** — The provider locates the browser's cookie database and safely accesses it, even if the browser is actively running and holding file locks (via NT handle duplication).
+3.  **Decryption** — The provider injects a helper DLL into the target browser process to unwrap the App-Bound Encryption key through the browser's own elevation service, then decrypts each cookie with AES-256-GCM.
 4.  **Processing** — The raw SQLite database is parsed, cookies are decrypted, and the data is formatted into JSON.
 5.  **Cleanup** — All temporary files, injected modules, and hidden browser instances are destroyed, leaving no trace.
 
@@ -69,12 +70,17 @@ Unlike monolithic tools that break when a single browser updates its security mo
 
 | Browser | Status | Notes |
 | :--- | :--- | :--- |
-| **Google Chrome** | ✅ Supported | Full support for modern Chrome versions (including App-Bound Encryption). |
+| **Google Chrome** | ✅ Supported | Chrome 127+ including App-Bound Encryption and the `IElevator2` interface (144+). |
+| **Microsoft Edge** | ✅ Supported | Edge 127+ including App-Bound Encryption and the `IElevator2` interface (144+). |
 | Chromium | 🚧 Planned | Requires separate provider. |
-| Microsoft Edge | 🚧 Planned | Requires separate provider. |
 | Brave | 🚧 Planned | Requires separate provider. |
 | Firefox | 🚧 Planned | Requires separate provider (uses NSS). |
 | Opera / Vivaldi | 🚧 Planned | |
+
+### Version range
+
+- **Chrome:** 127 and newer. The tool targets the App-Bound Encryption era exclusively; pre-127 `v10` DPAPI cookies are not supported.
+- **Edge:** 127 and newer. Same rationale as Chrome.
 
 ---
 
@@ -84,11 +90,10 @@ Unlike monolithic tools that break when a single browser updates its security mo
 
 - **Windows 10/11 (x64)**
 - **Visual Studio 2022 or newer** with the *Desktop development with C++* workload
-- **[vcpkg](https://github.com/microsoft/vcpkg)** with the following packages installed:
+- **[vcpkg](https://github.com/microsoft/vcpkg)** with the following package installed:
 
   ```powershell
   C:\vcpkg\vcpkg install sqlite3:x64-windows-static
-  C:\vcpkg\vcpkg install nlohmann-json:x64-windows
   ```
 
 ### Build steps
@@ -101,25 +106,49 @@ Unlike monolithic tools that break when a single browser updates its security mo
     .\build.bat
     ```
 
-4.  The final portable executable is at `build\Cookier.exe`. You can move it anywhere on your system.
+3.  The final portable executable is at `build\Cookier.exe`. You can move it anywhere on your system.
 
 ---
 
 ## Usage
 
-Cookier operates silently by default. You must pass the `--browser` flag to initiate an extraction.
+Cookier does **nothing** without the `--browser` flag — this prevents accidental execution in scripts or pipelines.
+
+### Extract from a single browser
 
 ```powershell
-# Extract cookies from the default Chrome profile
+# Default profile
 .\Cookier.exe --browser chrome
+.\Cookier.exe --browser edge
 
-# Extract from ALL Chrome profiles into one file
+# All profiles
 .\Cookier.exe --browser chrome --profile all
+.\Cookier.exe --browser edge --profile all
 
-# Extract from specific profiles
+# Specific profiles
 .\Cookier.exe --browser chrome --profile "Default" "Profile 1"
+```
 
-# Save to a custom path
+### Extract from every supported browser at once
+
+```powershell
+.\Cookier.exe --browser all
+```
+
+This nests results as `{"chrome": {...}, "edge": {...}}` — one key per browser, each containing the per-profile cookie groups.
+
+### Output
+
+By default, JSON is **printed to stdout**. Status messages (`[*]`, `[+]`, `[!]`) go to **stderr**, so piping into external tools is clean:
+
+```powershell
+.\Cookier.exe --browser chrome | jq '."Default"[0]'
+.\Cookier.exe --browser chrome > cookies.json
+```
+
+To write to a file explicitly:
+
+```powershell
 .\Cookier.exe --browser chrome --output C:\Users\Public\my_cookies.json
 ```
 
@@ -127,13 +156,14 @@ Cookier operates silently by default. You must pass the `--browser` flag to init
 
 | Flag | Short | Description |
 | :--- | :--- | :--- |
-| `--browser <name>` | `-b` | Required. `chrome` or `all`. |
+| `--browser <name>` | `-b` | **Required.** `chrome`, `edge`, or `all`. |
 | `--profile <names>` | `-p` | `all` or a space-separated list of profile folder names. Defaults to `Default`. |
-| `--output <path>` | `-o` | Output JSON path. If omitted, JSON is printed to stdout. |
+| `--output <path>` | `-o` | Write JSON to this file. If omitted, JSON goes to stdout. |
 | `--verbose` | `-v` | Enable debug logs. |
-| `--help` | `-h` | Show usage. |
+| `--version` | | Print version and exit. |
+| `--help` | `-h` | Print usage and exit. |
 
-### Output format
+### Output format (single browser)
 
 ```json
 {
@@ -152,16 +182,32 @@ Cookier operates silently by default. You must pass the `--browser` flag to init
 }
 ```
 
+### Output format (`--browser all`)
+
+```json
+{
+  "chrome": {
+    "Default": [ ... ],
+    "Profile 1": [ ... ]
+  },
+  "edge": {
+    "Default": [ ... ]
+  }
+}
+```
+
 ---
 
 ## Technical details
 
 | Component | Purpose |
 | :--- | :--- |
-| **Provider Architecture** | Browser-specific logic is compiled into separate DLLs, embedded as resources in the main EXE, and extracted dynamically at runtime. |
-| **Database Handling** | Utilizes advanced handle management to safely read SQLite databases (including `.wal` and `.shm` files) without disrupting the browser's active processes. |
-| **Cryptography** | Leverages Windows BCrypt APIs and browser-specific interfaces to decrypt modern cookie payloads. |
-| **Process Management** | Capable of launching and managing invisible browser instances on isolated desktops to guarantee stealth and zero user disruption. |
+| **Provider Architecture** | Browser-specific logic is compiled into a single shared `Provider_Chromium.dll`, embedded as a resource in the main EXE, and extracted to a unique temp directory at runtime. The provider takes the browser name as a runtime parameter. |
+| **Injector** | A single self-detecting `ChromiumInjector.dll` is embedded inside the provider. It inspects `GetModuleFileNameW` inside the target process to decide whether to use the Chrome or Edge CLSID. |
+| **Database Handling** | Utilizes NT handle duplication (`NtQuerySystemInformation` + `DuplicateHandle`) to read SQLite databases (including `.wal` and `.shm`) without disrupting the browser's active processes. |
+| **Cryptography** | Uses Windows BCrypt for AES-256-GCM. Chrome/Edge 130+ prepend a 32-byte `SHA-256(host_key)` to the decrypted `v20` plaintext; Cookier detects and strips this prefix with backwards-compatible fallback. |
+| **Elevation** | The EXE ships with a `requireAdministrator` manifest. `SeDebugPrivilege` is required for handle duplication; the elevation service also requires the caller to be elevated. |
+| **Process Management** | Capable of launching and managing invisible browser instances on isolated desktops (`CreateDesktopW`) to guarantee stealth and zero user disruption. |
 
 ---
 
