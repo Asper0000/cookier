@@ -1,4 +1,4 @@
-<p align="center">
+﻿<p align="center">
   <img src="assets/icon.svg" width="160" height="160" alt="Cookier logo">
 </p>
 
@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/Version-0.0.2-6f42c1" alt="Version 0.0.2"></a>
+  <a href="#"><img src="https://img.shields.io/badge/Version-0.0.3-6f42c1" alt="Version 0.0.3"></a>
   <a href="https://isocpp.org/"><img src="https://img.shields.io/badge/C%2B%2B-17-00599C?logo=c%2B%2B&logoColor=white" alt="C++17"></a>
   <a href="#"><img src="https://img.shields.io/badge/Platform-Windows%2010%2F11%20(x64)-0078D6?logo=windows&logoColor=white" alt="Platform"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License"></a>
@@ -47,12 +47,13 @@ Unlike monolithic tools that break when a single browser updates its security mo
 ## Features
 
 - ✅ **Modular Providers** — Separate, isolated logic for each browser. Adding a new browser does not affect existing ones.
-- ✅ **Chrome + Edge support** — Full support for the modern App-Bound Encryption (ABE) era (Chrome 127+, Edge 127+, including 144+).
+- ✅ **Chrome + Edge + Brave support** — Full support for the modern App-Bound Encryption (ABE) era (Chrome 127+, Edge 127+, Brave 1.63+).
 - ✅ **Live Browser Extraction** — Safely extracts data from browsers that are currently open and running.
 - ✅ **Multi-Profile Support** — Extract from default profiles, specific named profiles, or all profiles at once.
 - ✅ **Silent Operation** — If a target browser is not running, Cookier can launch a hidden, background instance to extract the data and then cleanly terminate itself.
 - ✅ **Pretty-Printed JSON** — Structured output grouped by profile, piped to stdout by default so any external tool can consume it.
 - ✅ **No external dependencies** — SQLite, the injector, and the provider are all statically linked and embedded.
+- ✅ **Deep diagnostics** — `--verbose` writes a timestamped trace of every COM, injector and SQLite step to `C:\Users\Public\cookier_debug.log`.
 
 ---
 
@@ -60,7 +61,7 @@ Unlike monolithic tools that break when a single browser updates its security mo
 
 1.  **Provider Selection** — Based on your CLI arguments, Cookier loads the embedded provider module into a secure temporary environment.
 2.  **Data Acquisition** — The provider locates the browser's cookie database and safely accesses it, even if the browser is actively running and holding file locks (via NT handle duplication).
-3.  **Decryption** — The provider injects a helper DLL into the target browser process to unwrap the App-Bound Encryption key through the browser's own elevation service, then decrypts each cookie with AES-256-GCM.
+3.  **Decryption** — The provider injects a helper DLL into the target browser's **main** process only (child processes are skipped via a `--type=` command-line guard) to unwrap the App-Bound Encryption key through the browser's own elevation service, then decrypts each cookie with AES-256-GCM.
 4.  **Processing** — The raw SQLite database is parsed, cookies are decrypted, and the data is formatted into JSON.
 5.  **Cleanup** — All temporary files, injected modules, and hidden browser instances are destroyed, leaving no trace.
 
@@ -72,15 +73,18 @@ Unlike monolithic tools that break when a single browser updates its security mo
 | :--- | :--- | :--- |
 | **Google Chrome** | ✅ Supported | Chrome 127+ including App-Bound Encryption and the `IElevator2` interface (144+). |
 | **Microsoft Edge** | ✅ Supported | Edge 127+ including App-Bound Encryption and the `IElevator2` interface (144+). |
+| **Brave** | ✅ Supported | Brave 1.63+ including App-Bound Encryption. Uses Brave's own CLSID and IElevator v1 IID, plus Chrome's shared IElevator2 IID. |
 | Chromium | 🚧 Planned | Requires separate provider. |
-| Brave | 🚧 Planned | Requires separate provider. |
 | Firefox | 🚧 Planned | Requires separate provider (uses NSS). |
+| LibreWolf | 🚧 Planned | Requires separate provider (Gecko, plaintext `cookies.sqlite`). |
+| Waterfox | 🚧 Planned | Requires separate provider (Gecko, plaintext `cookies.sqlite`). |
 | Opera / Vivaldi | 🚧 Planned | |
 
 ### Version range
 
 - **Chrome:** 127 and newer. The tool targets the App-Bound Encryption era exclusively; pre-127 `v10` DPAPI cookies are not supported.
 - **Edge:** 127 and newer. Same rationale as Chrome.
+- **Brave:** 1.63 and newer (first Brave release to ship App-Bound Encryption).
 
 ---
 
@@ -120,10 +124,12 @@ Cookier does **nothing** without the `--browser` flag — this prevents accident
 # Default profile
 .\Cookier.exe --browser chrome
 .\Cookier.exe --browser edge
+.\Cookier.exe --browser brave
 
 # All profiles
 .\Cookier.exe --browser chrome --profile all
 .\Cookier.exe --browser edge --profile all
+.\Cookier.exe --browser brave --profile all
 
 # Specific profiles
 .\Cookier.exe --browser chrome --profile "Default" "Profile 1"
@@ -135,7 +141,7 @@ Cookier does **nothing** without the `--browser` flag — this prevents accident
 .\Cookier.exe --browser all
 ```
 
-This nests results as `{"chrome": {...}, "edge": {...}}` — one key per browser, each containing the per-profile cookie groups.
+This nests results as `{"chrome": {...}, "edge": {...}, "brave": {...}}` — one key per browser, each containing the per-profile cookie groups.
 
 ### Output
 
@@ -156,10 +162,10 @@ To write to a file explicitly:
 
 | Flag | Short | Description |
 | :--- | :--- | :--- |
-| `--browser <name>` | `-b` | **Required.** `chrome`, `edge`, or `all`. |
+| `--browser <name>` | `-b` | **Required.** `chrome`, `edge`, `brave`, or `all`. |
 | `--profile <names>` | `-p` | `all` or a space-separated list of profile folder names. Defaults to `Default`. |
 | `--output <path>` | `-o` | Write JSON to this file. If omitted, JSON goes to stdout. |
-| `--verbose` | `-v` | Enable debug logs. |
+| `--verbose` | `-v` | Enable debug logs. Writes a timestamped trace to `C:\Users\Public\cookier_debug.log` covering every injector and provider step. |
 | `--version` | | Print version and exit. |
 | `--help` | `-h` | Print usage and exit. |
 
@@ -192,6 +198,9 @@ To write to a file explicitly:
   },
   "edge": {
     "Default": [ ... ]
+  },
+  "brave": {
+    "Default": [ ... ]
   }
 }
 ```
@@ -202,12 +211,15 @@ To write to a file explicitly:
 
 | Component | Purpose |
 | :--- | :--- |
-| **Provider Architecture** | Browser-specific logic is compiled into a single shared `Provider_Chromium.dll`, embedded as a resource in the main EXE, and extracted to a unique temp directory at runtime. The provider takes the browser name as a runtime parameter. |
-| **Injector** | A single self-detecting `ChromiumInjector.dll` is embedded inside the provider. It inspects `GetModuleFileNameW` inside the target process to decide whether to use the Chrome or Edge CLSID. |
+| **Provider Architecture** | Browser-specific logic is compiled into a single shared `Provider_Chromium.dll`, embedded as a resource in the main EXE, and extracted to a unique temp directory at runtime. The provider takes the browser name (`chrome` / `edge` / `brave`) as a runtime parameter. |
+| **Injector** | A single self-detecting `ChromiumInjector.dll` is embedded inside the provider. It inspects `GetModuleFileNameW` inside the target process to select the correct CLSID, and only runs in the browser's **main** process — child processes (identified by a `--type=` command-line flag) are skipped to prevent mutex races and key-file truncation. |
+| **Brave COM identifiers** | Brave uses a distinct CLSID (`{576B31AF-6369-4B6B-8560-E4B203A97A8B}`) and a Brave-specific IElevator v1 IID (`{F396861E-0C8E-4C71-8256-2FAE6D759CE9}`), while reusing Chrome's shared IElevator2 IID (`{1BF5208B-295F-4992-B5F4-3A9BB6494838}`). Brave's `Local State` lives at `%LOCALAPPDATA%\BraveSoftware\Brave-Browser\User Data\Local State`. |
+| **Executable discovery** | `FindBrowserExe` prefers the canonical path from `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\brave.exe` (and its `WOW6432Node` mirror), then falls back to Program Files candidates and finally the per-user `%LOCALAPPDATA%` install. The elevation service path-validates the calling executable, so launching anything other than the registered binary returns `PATH_NOT_FOUND` from `DecryptData`. |
 | **Database Handling** | Utilizes NT handle duplication (`NtQuerySystemInformation` + `DuplicateHandle`) to read SQLite databases (including `.wal` and `.shm`) without disrupting the browser's active processes. |
-| **Cryptography** | Uses Windows BCrypt for AES-256-GCM. Chrome/Edge 130+ prepend a 32-byte `SHA-256(host_key)` to the decrypted `v20` plaintext; Cookier detects and strips this prefix with backwards-compatible fallback. |
-| **Elevation** | The EXE ships with a `requireAdministrator` manifest. `SeDebugPrivilege` is required for handle duplication; the elevation service also requires the caller to be elevated. |
+| **Cryptography** | Uses Windows BCrypt for AES-256-GCM. Chrome/Edge/Brave 130+ prepend a 32-byte `SHA-256(host_key)` to the decrypted `v20` plaintext; Cookier detects and strips this prefix with backwards-compatible fallback. |
+| **Elevation** | The EXE ships with a `requireAdministrator` manifest. `SeDebugPrivilege` is required for handle duplication; the elevation service also requires the caller to be elevated. The injector waits up to 30 s on the cross-process mutex and the provider polls for the resulting key file for up to 20 s, covering Brave's cold elevation-service startup. |
 | **Process Management** | Capable of launching and managing invisible browser instances on isolated desktops (`CreateDesktopW`) to guarantee stealth and zero user disruption. |
+| **Debug logging** | When `--verbose` is passed, both the provider and the injector append to `C:\Users\Public\cookier_debug.log`, capturing PIDs, browser-kind detection, main-vs-child decisions, every `CoCreateInstance` and `DecryptData` HRESULT, wait-loop progress, and SQLite extraction stats. The log is truncated at the start of each verbose run. |
 
 ---
 

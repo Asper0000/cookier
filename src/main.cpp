@@ -40,9 +40,9 @@ int wmain(int argc, wchar_t* argv[]) {
 
     for (int i = 1; i < argc; ++i) {
         std::wstring arg = argv[i];
-        if (arg == L"--version") { std::cout << "Cookier v0.0.2\n"; return 0; }
+        if (arg == L"--version") { std::cout << "Cookier v0.0.3\n"; return 0; }
         if (arg == L"--help" || arg == L"-h") {
-            std::cout << "Usage: Cookier.exe --browser chrome/edge/all [--profile name1,name2/all] [--output file.json] [--verbose] [--version]\n";
+            std::cout << "Usage: Cookier.exe --browser chrome/edge/brave/all [--profile name1,name2/all] [--output file.json] [--verbose] [--version]\n";
             std::cout << "  Default: JSON to stdout. Use --output <file> to save to a file.\n";
             return 0;
         }
@@ -61,8 +61,8 @@ int wmain(int argc, wchar_t* argv[]) {
     if (browser.empty()) return 0;
 
     std::vector<std::string> targets;
-    if (browser == "all") { std::cerr << "[*] Extracting from all supported browsers...\n"; targets = {"chrome", "edge"}; }
-    else if (browser == "chrome" || browser == "edge") { targets = {browser}; }
+    if (browser == "all") { std::cerr << "[*] Extracting from all supported browsers...\n"; targets = {"chrome", "edge", "brave"}; }
+    else if (browser == "chrome" || browser == "edge" || browser == "brave") { targets = {browser}; }
     else { std::cerr << "[!] Unsupported browser: " << browser << "\n"; return 1; }
 
     wchar_t tempPath[MAX_PATH]; GetTempPathW(MAX_PATH, tempPath);
