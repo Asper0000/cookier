@@ -1,4 +1,4 @@
-﻿#define PROVIDER_EXPORTS
+#define PROVIDER_EXPORTS
 #include "../../src/Cookier.h"
 #include <windows.h>
 #include <shlobj.h>
@@ -354,7 +354,15 @@ static std::string ExtractCookiesFromDb(const std::wstring& dbPath, const std::v
     return out;
 }
 
+extern "C" bool ExtractGeckoCookies(char** outJson, const char* browserName, const char* profileList, bool verbose);
+
 extern "C" PROVIDER_API bool ExtractCookies(char** outJson, const char* browserName, const char* profileList, bool verbose) {
+    {
+        std::string __b = browserName ? browserName : "chrome";
+        if (__b == "firefox" || __b == "librewolf" || __b == "waterfox") {
+            return ExtractGeckoCookies(outJson, browserName, profileList, verbose);
+        }
+    }
     g_verbose = verbose;
     EnableDebug(verbose);
     std::string browser = browserName ? browserName : "chrome";

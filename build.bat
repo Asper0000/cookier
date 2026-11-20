@@ -14,8 +14,6 @@ echo [*] Visual Studio: %VS_PATH%
 call "%VS_PATH%\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
 if %errorlevel% neq 0 goto error
 
-rem Only use the STATIC vcpkg triplet for both headers and libs.
-rem nlohmann/json is no longer needed anywhere.
 set "VCPKG_INC=C:\vcpkg\installed\x64-windows-static\include"
 set "VCPKG_LIB=C:\vcpkg\installed\x64-windows-static\lib"
 
@@ -26,9 +24,9 @@ echo [1/4] Compiling ChromiumInjector.dll...
 cl /LD /MT /EHsc /std:c++17 /O1 /Gy /GL ..\providers\chromium\ChromiumInjector.cpp /link /LTCG /OPT:REF /OPT:ICF ole32.lib oleaut32.lib shlwapi.lib shell32.lib user32.lib
 if %errorlevel% neq 0 goto error
 
-echo [2/4] Compiling Provider_Chromium.dll...
+echo [2/4] Compiling Provider_Chromium.dll (includes Gecko engine)...
 rc /fo ChromiumProvider.res ..\providers\chromium\ChromiumProvider.rc
-cl /LD /MT /EHsc /std:c++17 /O1 /Gy /GL /DSQLITE_STATIC ..\providers\chromium\ChromiumProvider.cpp ChromiumProvider.res /I"%VCPKG_INC%" /link /LTCG /OPT:REF /OPT:ICF /LIBPATH:"%VCPKG_LIB%" sqlite3.lib bcrypt.lib crypt32.lib ole32.lib oleaut32.lib shlwapi.lib shell32.lib advapi32.lib ntdll.lib psapi.lib user32.lib ws2_32.lib /out:Provider_Chromium.dll
+cl /LD /MT /EHsc /std:c++17 /O1 /Gy /GL /DSQLITE_STATIC ..\providers\chromium\ChromiumProvider.cpp ..\providers\gecko\GeckoExtract.cpp ChromiumProvider.res /I"%VCPKG_INC%" /link /LTCG /OPT:REF /OPT:ICF /LIBPATH:"%VCPKG_LIB%" sqlite3.lib bcrypt.lib crypt32.lib ole32.lib oleaut32.lib shlwapi.lib shell32.lib advapi32.lib ntdll.lib psapi.lib user32.lib ws2_32.lib /out:Provider_Chromium.dll
 if %errorlevel% neq 0 goto error
 
 echo [3/4] Compiling Cookier.exe...
@@ -45,7 +43,12 @@ del ChromiumProvider.res 2>nul
 del ChromiumProvider.obj 2>nul
 del ChromiumProvider.lib 2>nul
 del ChromiumProvider.exp 2>nul
+del GeckoExtract.obj 2>nul
 del Provider_Chromium.dll 2>nul
+del Provider_Gecko.dll 2>nul
+del GeckoProvider.obj 2>nul
+del GeckoProvider.lib 2>nul
+del GeckoProvider.exp 2>nul
 del Cookier.res 2>nul
 del main.obj 2>nul
 

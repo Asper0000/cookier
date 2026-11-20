@@ -1,4 +1,4 @@
-﻿#define WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <shlobj.h>
 #include <iostream>
@@ -40,9 +40,9 @@ int wmain(int argc, wchar_t* argv[]) {
 
     for (int i = 1; i < argc; ++i) {
         std::wstring arg = argv[i];
-        if (arg == L"--version") { std::cout << "Cookier v0.0.3\n"; return 0; }
+        if (arg == L"--version") { std::cout << "Cookier v0.0.4\n"; return 0; }
         if (arg == L"--help" || arg == L"-h") {
-            std::cout << "Usage: Cookier.exe --browser chrome/edge/brave/all [--profile name1,name2/all] [--output file.json] [--verbose] [--version]\n";
+            std::cout << "Usage: Cookier.exe --browser chrome/edge/brave/firefox/librewolf/waterfox/all [--profile name1,name2/all] [--output file.json] [--verbose] [--version]\n";
             std::cout << "  Default: JSON to stdout. Use --output <file> to save to a file.\n";
             return 0;
         }
@@ -61,21 +61,29 @@ int wmain(int argc, wchar_t* argv[]) {
     if (browser.empty()) return 0;
 
     std::vector<std::string> targets;
-    if (browser == "all") { std::cerr << "[*] Extracting from all supported browsers...\n"; targets = {"chrome", "edge", "brave"}; }
-    else if (browser == "chrome" || browser == "edge" || browser == "brave") { targets = {browser}; }
+    if (browser == "all") { std::cerr << "[*] Extracting from all supported browsers...\n"; targets = {"chrome", "edge", "brave", "firefox", "librewolf", "waterfox"}; }
+    else if (browser == "chrome" || browser == "edge" || browser == "brave" || browser == "firefox" || browser == "librewolf" || browser == "waterfox") { targets = {browser}; }
     else { std::cerr << "[!] Unsupported browser: " << browser << "\n"; return 1; }
 
     wchar_t tempPath[MAX_PATH]; GetTempPathW(MAX_PATH, tempPath);
     std::wstring dllPath = std::wstring(tempPath) + L"Cookier_Provider_Chromium_" + std::to_wstring(GetCurrentProcessId()) + L".dll";
     DeleteFileW(dllPath.c_str());
 
-    HRSRC hRes = FindResourceW(NULL, MAKEINTRESOURCEW(100), MAKEINTRESOURCEW(10));
-    if (!hRes) { std::cerr << "[!] Failed to find embedded Chromium provider.\n"; return 1; }
-    HGLOBAL hMem = LoadResource(NULL, hRes); void* pData = LockResource(hMem); DWORD size = SizeofResource(NULL, hRes);
-    std::ofstream out(dllPath, std::ios::binary); out.write((char*)pData, size); out.close();
 
-    HMODULE hProvider = LoadLibraryW(dllPath.c_str());
-    if (!hProvider) { std::cerr << "[!] Failed to load Chromium provider. Error: " << GetLastError() << "\n"; return 1; }
+    std::wstring providerDllPath = std::wstring(tempPath) + L"Cookier_Provider_Chromium_" + std::to_wstring(GetCurrentProcessId()) + L".dll";
+    DeleteFileW(providerDllPath.c_str());
+
+    HRSRC hRes = FindResourceW(NULL, MAKEINTRESOURCEW(100), MAKEINTRESOURCEW(10));
+    if (!hRes) { std::cerr << "[!] Failed to find embedded provider.\n"; return 1; }
+    HGLOBAL hMem = LoadResource(NULL, hRes);
+    void* pData = LockResource(hMem);
+    DWORD size = SizeofResource(NULL, hRes);
+    std::ofstream out(providerDllPath, std::ios::binary);
+    out.write((char*)pData, size);
+    out.close();
+
+    HMODULE hProvider = LoadLibraryW(providerDllPath.c_str());
+    if (!hProvider) { std::cerr << "[!] Failed to load provider. Error: " << GetLastError() << "\n"; return 1; }
 
     ExtractCookiesFunc extractFunc = (ExtractCookiesFunc)GetProcAddress(hProvider, "ExtractCookies");
     if (!extractFunc) { std::cerr << "[!] Failed to find ExtractCookies.\n"; FreeLibrary(hProvider); return 1; }
@@ -92,7 +100,8 @@ int wmain(int argc, wchar_t* argv[]) {
         }
     }
 
-    FreeLibrary(hProvider); DeleteFileW(dllPath.c_str());
+    FreeLibrary(hProvider);
+    DeleteFileW(providerDllPath.c_str());
     if (results.empty()) return 1;
 
     std::string output;
